@@ -1,278 +1,1321 @@
-const { pool } = require('../config/database');
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Архив ЭПБ · Финальная версия (виртуализация + расширенные отчёты)</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    <style>
+        /* Стили (без русских идентификаторов) */
+        * { box-sizing: border-box; margin: 0; font-family: 'Inter', sans-serif; }
+        body { background: #f5f7fa; min-height: 100vh; display: flex; flex-direction: column; }
+        .app { width: 100%; max-width: 1400px; margin: 0 auto; background: white; display: flex; flex-direction: column; min-height: 100vh; padding: 20px 24px; }
+        h1 { font-size: 1.8rem; font-weight: 500; color: #1e2f4d; margin: 0 0 16px 0; text-align: center; }
+        .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; background: #f9fafc; padding: 12px 20px; border-radius: 12px; border: 1px solid #e2e8f0; align-items: center; }
+        .toolbar button, .toolbar .search-box { margin: 0; }
+        .search-box { margin-left: auto; background: white; border-radius: 30px; border: 1px solid #d0d9e4; padding: 3px 3px 3px 16px; display: flex; align-items: center; }
+        .search-box input { border: none; padding: 6px 10px; width: 200px; outline: none; background: transparent; }
+        .user-info { display: flex; align-items: center; gap: 12px; background: #e8eff8; padding: 5px 15px; border-radius: 30px; }
+        .user-info span { font-weight: 500; color: #1e3f68; }
+        .table-wrapper { flex: 1; background: white; border-radius: 16px; overflow: auto; border: 1px solid #e2e8f0; position: relative; height: 100%; }
+        table { width: 100%; border-collapse: collapse; min-width: 1100px; }
+        th, td { padding: 12px 8px; border-bottom: 1px solid #edf2f7; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; text-align: center; vertical-align: middle; }
+        #orgTable tbody tr:hover { background-color: #f0f4fa; cursor: pointer; }
+        td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px; }
+        td.expired-docs-cell { white-space: normal; text-align: left; max-width: 300px; }
+        th { background: #f8fafd; font-weight: 600; border-bottom: 2px solid #d8e1ec; cursor: pointer; position: sticky; top: 0; z-index: 10; }
+        tr.selected { background-color: #ecf3fd; }
+        tr.expired-row { background-color: #fff0f0; }
+        .pagination { display: flex; justify-content: flex-end; gap: 16px; margin-top: 16px; align-items: center; flex-wrap: wrap; }
+        .pagination-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .modal { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.4); align-items: center; justify-content: center; z-index: 1000; }
+        .modal.active { display: flex; }
+        .modal-content { background: white; border-radius: 24px; max-width: 1000px; width: 95%; max-height: 90vh; overflow-y: auto; padding: 24px 28px; position: relative; }
+        .modal-content.small { max-width: 500px; }
+        .modal-close { position: absolute; top: 16px; right: 20px; font-size: 1.5rem; cursor: pointer; color: #8aa0b8; }
+        .modal-close:hover { color: #1e3f68; }
+        .form-row { margin-bottom: 16px; display: flex; flex-direction: column; }
+        .form-row label { font-weight: 500; font-size: 0.85rem; color: #5a7795; margin-bottom: 4px; text-align: left; }
+        .form-row input, .form-row select { padding: 10px 14px; border: 1px solid #d0d9e4; border-radius: 16px; width: 100%; }
+        .form-row input.error, .form-row select.error { border-color: #b13e3e; background-color: #fff8f8; }
+        .error-message { color: #b13e3e; font-size: 0.75rem; margin-top: 4px; display: none; }
+        .error-message.visible { display: block; }
+        .btn { padding: 10px 24px; border-radius: 30px; border: none; cursor: pointer; font-weight: 500; transition: 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        .btn-primary { background: #1e3f68; color: white; }
+        .btn-primary:hover { background: #0f2b48; }
+        .btn-secondary { background: #e2ebf5; color: #1e3f68; }
+        .btn-danger { background: #fbecec; color: #b13e3e; }
+        .btn-danger:hover { background: #f8d7d7; }
+        .btn-compact { padding: 8px 16px; font-size: 0.85rem; }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .toast-container { position: fixed; top: 20px; right: 20px; z-index: 2000; display: flex; flex-direction: column; gap: 10px; }
+        .toast { background: #1e3f68; color: white; padding: 12px 20px; border-radius: 30px; animation: slideIn 0.2s ease; }
+        .toast.success { background: #1f6b1f; }
+        .toast.warning { background: #b13e3e; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .footer-note { margin-top: 14px; text-align: center; color: #5f7c9a; font-size: 0.85rem; }
+        @media (max-width: 768px) {
+            .app { padding: 12px; }
+            h1 { font-size: 1.4rem; }
+            .toolbar { flex-direction: column; align-items: stretch; }
+            .search-box { margin-left: 0; }
+            .user-info { margin-left: 0; justify-content: center; }
+            th, td { padding: 8px 4px; font-size: 0.8rem; }
+            .modal-content { padding: 16px; }
+        }
+        .opo-item, .org-doc-item, .opo-doc-item { background: #fafcfe; border-radius: 16px; padding: 16px; margin-bottom: 16px; border: 1px solid #e2ecf5; position: relative; text-align: left; }
+        .remove-opo, .remove-doc { position: absolute; top: 16px; right: 16px; cursor: pointer; color: #b13e3e; font-size: 1.2rem; }
+        .duration-row { display: flex; gap: 10px; margin: 8px 0; flex-wrap: wrap; align-items: center; }
+        .add-doc-panel { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+        .expertise-item-compact { background: #f9fcff; border: 1px solid #e0eaf5; border-radius: 12px; padding: 12px 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+        .expired-doc-item { font-size: 0.85rem; margin-bottom: 4px; text-align: left; }
+        .file-attach { border: 1px dashed #b0c6dd; border-radius: 30px; padding: 8px 14px; background: white; display: flex; justify-content: space-between; cursor: pointer; margin-top: 8px; }
+        .hidden { display: none; }
+        .report-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        .report-table th, .report-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        .report-table th { background: #f8fafd; }
+        .btn-collapse { position: absolute; top: 16px; right: 50px; cursor: pointer; font-size: 1.2rem; color: #8aa0b8; }
+        .btn-collapse:hover { color: #1e3f68; }
+    </style>
+</head>
+<body>
+<div class="app" id="appContainer">
+    <div id="mainUI" style="display: none;">
+        <h1><i class="fas fa-folder-open"></i> Архив организаций и ОПО</h1>
+        <div class="toolbar">
+            <button id="addOrgBtn"><i class="fas fa-building"></i> Добавить организацию</button>
+            <button id="exportBtn"><i class="fas fa-file-excel"></i> Экспорт</button>
+            <button id="importBtn"><i class="fas fa-file-import"></i> Импорт (реестр ЗЭПБ)</button>
+            <button id="backupBtn" class="btn-secondary"><i class="fas fa-database"></i> Резервное копирование</button>
+            <div class="dropdown" style="position: relative;">
+                <button id="reportDropdownBtn" class="btn-secondary"><i class="fas fa-chart-bar"></i> Отчёты ▼</button>
+                <div id="reportDropdownMenu" style="display: none; position: absolute; top: 100%; left: 0; background: white; border: 1px solid #ddd; border-radius: 8px; z-index: 100; min-width: 220px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                    <button id="reportExpiredBtn" style="width: 100%; text-align: left; padding: 8px 16px; border: none; background: none; cursor: pointer;"><i class="fas fa-calendar-times"></i> Просроченные документы</button>
+                    <button id="reportMonthBtn" style="width: 100%; text-align: left; padding: 8px 16px; border: none; background: none; cursor: pointer;"><i class="fas fa-calendar-week"></i> Истекают через месяц</button>
+                    <button id="reportTwoMonthsBtn" style="width: 100%; text-align: left; padding: 8px 16px; border: none; background: none; cursor: pointer;"><i class="fas fa-calendar-alt"></i> Истекают через два месяца</button>
+                    <hr style="margin: 4px 0;">
+                    <button id="reportMissingDocsBtn" style="width: 100%; text-align: left; padding: 8px 16px; border: none; background: none; cursor: pointer;"><i class="fas fa-file-alt"></i> Организации без документов</button>
+                    <button id="reportIncompleteBtn" style="width: 100%; text-align: left; padding: 8px 16px; border: none; background: none; cursor: pointer;"><i class="fas fa-exclamation-triangle"></i> Незаполненные поля</button>
+                </div>
+            </div>
+            <div class="user-info">
+                <i class="fas fa-user-circle"></i> <span id="currentUsername"></span>
+                <button id="logoutBtn" class="btn-secondary btn-compact"><i class="fas fa-sign-out-alt"></i> Выйти</button>
+            </div>
+            <div class="search-box"><i class="fas fa-search"></i><input type="text" id="searchInput" placeholder="Поиск по названию или ИНН..."></div>
+        </div>
+        <div class="table-wrapper" id="tableWrapper">
+            <table id="orgTable">
+                <thead>
+                    <tr><th data-sort="npp">№ пп</th><th data-sort="createdAt">Дата добавления</th><th data-sort="org">Организация</th><th data-sort="opoNames">ОПО</th><th data-sort="opoCount">Кол-во ОПО</th><th data-sort="expertiseCount">Кол-во ЭПБ</th><th data-sort="expiredCount">Просрочено</th><th>Документы с истекшим сроком</th></tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+        <div class="pagination"><div class="pagination-info" id="paginationInfo"></div><div class="pagination-controls"><select id="itemsPerPage"><option value="5">5</option><option value="10" selected>10</option><option value="25">25</option><option value="50">50</option></select><button id="prevPage" disabled>← Пред.</button><span id="currentPageDisplay">1</span><button id="nextPage" disabled>След. →</button></div></div>
+        <div class="footer-note"><i class="fas fa-database"></i> Данные на сервере PostgreSQL. Общая база. Импорт экспертиз из реестра ЗЭПБ.</div>
+    </div>
+</div>
 
-// 1. Отчёт "Организации без подгруженных документов"
-exports.getMissingDocsReport = async (req, res) => {
-    const { docType } = req.query; // опциональный фильтр по типу документа
-    try {
-        // Получаем все организации пользователя (или все, если общая база)
-        const orgsResult = await pool.query('SELECT id, name FROM organizations ORDER BY id');
-        const report = [];
+<!-- Модальное окно аутентификации -->
+<div id="authModal" class="modal active">
+    <div class="modal-content small">
+        <div class="modal-close" id="closeAuthModal">&times;</div>
+        <h2 id="authModalTitle">Вход</h2>
+        <div class="form-row"><label>Имя пользователя</label><input type="text" id="authUsername" autocomplete="username" placeholder="Введите имя"></div>
+        <div class="form-row" id="authEmailRow" style="display: none;"><label>Email</label><input type="email" id="authEmail" autocomplete="email" placeholder="example@company.ru"></div>
+        <div class="form-row"><label>Пароль</label><input type="password" id="authPassword" autocomplete="current-password" placeholder="Минимум 6 символов"></div>
+        <div class="error-message" id="authError" style="display: none;"></div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary btn-compact" id="switchAuthBtn">Регистрация</button>
+            <button class="btn btn-primary" id="submitAuthBtn">Войти</button>
+        </div>
+    </div>
+</div>
 
-        for (const org of orgsResult.rows) {
-            // Для каждого типа документа (из docTypesOrg) проверяем наличие документа
-            const docTypes = [
-                { id: 'prod', title: 'Производственный контроль' },
-                { id: 'plan', title: 'План мероприятий' },
-                { id: 'dogovor', title: 'Договор с АСС' },
-                { id: 'finance', title: 'Фин. средства' },
-                { id: 'protocol', title: 'Протокол аттестации' },
-                { id: 'svidetelstvo', title: 'Свидетельство ОПО' },
-                { id: 'other', title: 'Прочие' }
+<!-- Модальное окно организации с кнопкой закрытия -->
+<div id="orgModal" class="modal"><div class="modal-content"><div class="modal-close" id="closeOrgModal">&times;</div><div class="btn-collapse" id="collapseCardBtn" title="Свернуть/закрыть"><i class="fas fa-window-minimize"></i></div><h2 id="modalTitle">Организация</h2>
+<div class="form-section"><h3>Основные данные</h3>
+<div class="form-row"><label>Название *</label><input type="text" id="orgName" placeholder="ООО «Ромашка»"><div class="error-message" id="orgNameError"></div></div>
+<div class="flex-row"><div class="form-row" style="flex:1"><label>ИНН (10-12 цифр)</label><input type="text" id="orgInn" placeholder="7701123456"><div class="error-message" id="orgInnError"></div></div>
+<div class="form-row" style="flex:1"><label>Телефон</label><input type="text" id="orgPhone" placeholder="+7 (495) 123-45-67"><div class="error-message" id="orgPhoneError"></div></div></div>
+<div class="form-row"><label>Email</label><input type="email" id="orgEmail" placeholder="info@example.ru"><div class="error-message" id="orgEmailError"></div></div></div>
+<div class="form-section"><h3>Документы организации</h3><div class="add-doc-panel"><select id="orgDocTypeSelect"></select><button id="addOrgDocBtn" class="btn btn-compact">+ Добавить</button></div><div id="orgDocsContainer"></div></div>
+<div class="form-section"><h3>Экспертизы</h3><div id="expertiseListContainer"></div><button id="addExpertiseInOrgBtn" class="btn btn-compact">+ Добавить экспертизу</button></div>
+<h3>Опасные производственные объекты (ОПО)</h3><div id="opoListContainer"></div><button id="addOpoBtn" class="btn btn-compact">+ Добавить ОПО</button>
+<div class="modal-actions"><button class="btn btn-secondary btn-compact" id="cancelModal">Отмена</button><button class="btn btn-danger" id="deleteOrgBtn">Удалить организацию</button><button class="btn btn-primary" id="saveOrg">Сохранить</button></div></div></div>
+
+<!-- Модальное окно экспертизы -->
+<div id="expertiseModal" class="modal"><div class="modal-content small"><div class="modal-close" id="closeExpertiseModal">&times;</div><h2 id="expertiseModalTitle">Экспертиза</h2>
+<div class="form-row"><label>Организация</label><input type="text" id="expertiseOrgName" readonly style="background:#f0f4fa;"></div>
+<div class="form-row"><label>Название *</label><input type="text" id="expertiseName" placeholder="Экспертиза промышленной безопасности"><div class="error-message" id="expertiseNameError"></div></div>
+<div class="form-row"><label>Тип</label><select id="expertiseType"><option value="ЗС">ЗС</option><option value="ТУ">ТУ</option></select></div>
+<div class="form-row"><label>Дата проведения</label><input type="date" id="expertiseDate"><div class="error-message" id="expertiseDateError"></div></div>
+<div class="form-row"><label>Срок действия (лет)</label><select id="expertiseDuration"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select></div>
+<div class="form-row"><label>Ф.И.О. эксперта</label><input type="text" id="expertiseExpert" placeholder="Иванов И.И."></div>
+<div class="file-attach" id="expertiseFileAttach"><span><i class="fas fa-cloud-upload-alt"></i> Прикрепить файл</span><i class="fas fa-file-pdf"></i><input type="file" id="expertiseFile" style="display:none;"></div>
+<div class="file-info" id="expertiseFileInfo">Файл не выбран</div>
+<div class="modal-actions"><button class="btn btn-secondary btn-compact" id="cancelExpertiseModal">Отмена</button><button class="btn btn-primary" id="saveExpertise">Сохранить</button></div></div></div>
+
+<!-- Модальное окно подтверждения удаления -->
+<div id="confirmModal" class="modal"><div class="modal-content small"><div class="modal-close" id="closeConfirmModal">&times;</div><h2>Подтверждение удаления</h2><p id="confirmMessage">Вы уверены?</p><div class="modal-actions"><button class="btn btn-secondary" id="confirmCancelBtn">Отмена</button><button class="btn btn-danger" id="confirmOkBtn">Удалить</button></div></div></div>
+
+<!-- Модальное окно для отображения результатов отчётов -->
+<div id="reportResultModal" class="modal"><div class="modal-content" style="max-width: 1000px;"><div class="modal-close" id="closeReportResultModal">&times;</div><h2 id="reportResultTitle">Результат отчёта</h2><div id="reportResultContent"></div><div class="modal-actions"><button class="btn btn-secondary" id="closeReportResultBtn">Закрыть</button><button id="exportReportExcelBtn" class="btn-primary">Экспорт в Excel</button></div></div></div>
+
+<input type="file" id="importFileInput" accept=".xlsx,.xls" style="display:none">
+<div class="toast-container" id="toastContainer"></div>
+
+<template id="opoItemTemplate">
+    <div class="opo-item"><i class="fas fa-times-circle remove-opo"></i><h4>ОПО</h4>
+    <div class="form-row"><label>Название *</label><input class="opo-name" placeholder="Площадка цеха №5"><div class="error-message opo-name-error"></div></div>
+    <div class="form-row"><label>Адрес</label><input class="opo-addr" placeholder="г. Москва, ул. Промышленная 12"></div>
+    <div class="form-row"><label>Класс опасности *</label><select class="opo-class"><option value="">--</option><option value="I">I</option><option value="II">II</option><option value="III">III</option><option value="IV">IV</option></select><div class="error-message opo-class-error"></div></div>
+    <div class="form-row"><label>Регистрационный номер</label><input class="opo-regnum" placeholder="А56-12345-2024"></div>
+    <div class="opo-docs-container"></div>
+    <div class="add-doc-panel"><select class="opo-doc-type-select"></select><button class="add-opo-doc-btn btn btn-compact">+ Документ</button></div></div>
+</template>
+
+<script>
+(function(){
+    const API_URL = 'http://localhost:5000/api';
+    let token = localStorage.getItem('token');
+    let currentUser = null;
+
+    function sanitizeText(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+
+    function createSafeElement(tag, attributes, textContent) {
+        const el = document.createElement(tag);
+        if (attributes) Object.keys(attributes).forEach(key => el.setAttribute(key, attributes[key]));
+        if (textContent !== undefined) el.textContent = sanitizeText(textContent);
+        return el;
+    }
+
+    function showToast(message, type = 'info') {
+        let container = document.getElementById('toastContainer');
+        if (!container) {
+            container = createSafeElement('div', { id: 'toastContainer', class: 'toast-container' });
+            document.body.appendChild(container);
+        }
+        const toast = createSafeElement('div', { class: `toast ${type}` }, message);
+        container.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+
+    function formatDate(dateStr) {
+        if (!dateStr) return '—';
+        const cleanDate = dateStr.split('T')[0];
+        const parts = cleanDate.split('-');
+        if (parts.length === 3) return `${parts[2]}.${parts[1]}.${parts[0]}`;
+        return dateStr;
+    }
+
+    function isExpired(dateStr) {
+        if (!dateStr) return false;
+        const cleanDate = dateStr.split('T')[0];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const expiry = new Date(cleanDate + 'T12:00:00');
+        return expiry < today;
+    }
+
+    async function apiRequest(endpoint, options = {}) {
+        const url = `${API_URL}${endpoint}`;
+        const headers = { ...options.headers };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+        const response = await fetch(url, { ...options, headers });
+        if (response.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('username');
+            token = null;
+            document.getElementById('authModal').classList.add('active');
+            document.getElementById('mainUI').style.display = 'none';
+            throw new Error('Сессия истекла, войдите заново');
+        }
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Ошибка запроса');
+        return data;
+    }
+
+    class App {
+        constructor() {
+            this.elements = this.cacheElements();
+            this.organizations = [];
+            this.filteredOrgs = [];
+            this.currentPage = 1;
+            this.itemsPerPage = 10;
+            this.sortField = 'npp';
+            this.sortDir = 'asc';
+            this.searchTerm = '';
+            this.selectedOrgId = null;
+            this.currentOrgForEdit = null;
+            this.isLoginMode = true;
+            this.rowHeight = 60;
+            this.visibleRows = 20;
+            this.startIndex = 0;
+            this.scrollHandler = null;
+            this.wrapper = document.getElementById('tableWrapper');
+            this.tbody = document.getElementById('tableBody');
+            this.docTypesOrg = [
+                {id:'prod', title:'Производственный контроль', hasDuration:true},
+                {id:'plan', title:'План мероприятий', hasDuration:true},
+                {id:'dogovor', title:'Договор с АСС', hasDuration:true},
+                {id:'finance', title:'Фин. средства', hasDuration:true},
+                {id:'protocol', title:'Протокол аттестации', hasDuration:true},
+                {id:'svidetelstvo', title:'Свидетельство ОПО', hasDuration:false},
+                {id:'other', title:'Прочие', hasDuration:false}
             ];
-            // Если указан конкретный тип, фильтруем
-            const typesToCheck = docType ? docTypes.filter(t => t.id === docType) : docTypes;
-            
-            for (const type of typesToCheck) {
-                // Проверяем наличие документа организации
-                const docResult = await pool.query(
-                    'SELECT id, file_name, date, date_end FROM org_documents WHERE organization_id = $1 AND doc_type = $2',
-                    [org.id, type.id]
-                );
-                const doc = docResult.rows[0];
-                let reason = null;
-                if (!doc) {
-                    reason = 'Документ отсутствует';
-                } else if (!doc.file_name || doc.file_name === '') {
-                    reason = 'Файл не загружен';
-                } else if (!doc.date || !doc.date_end) {
-                    reason = 'Не заполнены даты (начала или окончания)';
-                }
-                if (reason) {
-                    report.push({
-                        org_name: org.name,
-                        opo_name: null,
-                        doc_type: type.title,
-                        reason: reason
-                    });
-                }
-            }
+            this.docTypesOpo = [
+                {id:'ins', title:'Страховой полис', hasDuration:true},
+                {id:'char', title:'Сведения характеризующие', hasDuration:false},
+                {id:'expertTU', title:'Экспертиза ТУ', hasDuration:true},
+                {id:'expertZS', title:'Экспертиза ЗС', hasDuration:true}
+            ];
+            this.init();
+        }
 
-            // Проверяем документы ОПО
-            const opoResult = await pool.query('SELECT id, name FROM opo_objects WHERE organization_id = $1', [org.id]);
-            for (const opo of opoResult.rows) {
-                const opoDocTypes = [
-                    { id: 'ins', title: 'Страховой полис' },
-                    { id: 'char', title: 'Сведения характеризующие' },
-                    { id: 'expertTU', title: 'Экспертиза ТУ' },
-                    { id: 'expertZS', title: 'Экспертиза ЗС' }
-                ];
-                const typesToCheckOpo = docType ? opoDocTypes.filter(t => t.id === docType) : opoDocTypes;
-                for (const type of typesToCheckOpo) {
-                    const docResult = await pool.query(
-                        'SELECT id, file_name, date, date_end FROM opo_documents WHERE opo_id = $1 AND doc_type = $2',
-                        [opo.id, type.id]
-                    );
-                    const doc = docResult.rows[0];
-                    let reason = null;
-                    if (!doc) {
-                        reason = 'Документ отсутствует';
-                    } else if (!doc.file_name || doc.file_name === '') {
-                        reason = 'Файл не загружен';
-                    } else if (!doc.date || !doc.date_end) {
-                        reason = 'Не заполнены даты (начала или окончания)';
-                    }
-                    if (reason) {
-                        report.push({
-                            org_name: org.name,
-                            opo_name: opo.name,
-                            doc_type: type.title,
-                            reason: reason
+        cacheElements() {
+            return {
+                mainUI: document.getElementById('mainUI'),
+                authModal: document.getElementById('authModal'),
+                closeAuthModal: document.getElementById('closeAuthModal'),
+                authModalTitle: document.getElementById('authModalTitle'),
+                authUsername: document.getElementById('authUsername'),
+                authEmail: document.getElementById('authEmail'),
+                authEmailRow: document.getElementById('authEmailRow'),
+                authPassword: document.getElementById('authPassword'),
+                authError: document.getElementById('authError'),
+                switchAuthBtn: document.getElementById('switchAuthBtn'),
+                submitAuthBtn: document.getElementById('submitAuthBtn'),
+                logoutBtn: document.getElementById('logoutBtn'),
+                currentUsername: document.getElementById('currentUsername'),
+                searchInput: document.getElementById('searchInput'),
+                itemsPerPage: document.getElementById('itemsPerPage'),
+                prevPage: document.getElementById('prevPage'),
+                nextPage: document.getElementById('nextPage'),
+                currentPageDisplay: document.getElementById('currentPageDisplay'),
+                paginationInfo: document.getElementById('paginationInfo'),
+                tbody: document.getElementById('tableBody'),
+                addOrgBtn: document.getElementById('addOrgBtn'),
+                exportBtn: document.getElementById('exportBtn'),
+                importBtn: document.getElementById('importBtn'),
+                backupBtn: document.getElementById('backupBtn'),
+                reportDropdownBtn: document.getElementById('reportDropdownBtn'),
+                reportDropdownMenu: document.getElementById('reportDropdownMenu'),
+                reportExpiredBtn: document.getElementById('reportExpiredBtn'),
+                reportMonthBtn: document.getElementById('reportMonthBtn'),
+                reportTwoMonthsBtn: document.getElementById('reportTwoMonthsBtn'),
+                reportMissingDocsBtn: document.getElementById('reportMissingDocsBtn'),
+                reportIncompleteBtn: document.getElementById('reportIncompleteBtn'),
+                importFileInput: document.getElementById('importFileInput'),
+                orgModal: document.getElementById('orgModal'),
+                closeOrgModal: document.getElementById('closeOrgModal'),
+                collapseCardBtn: document.getElementById('collapseCardBtn'),
+                orgName: document.getElementById('orgName'),
+                orgInn: document.getElementById('orgInn'),
+                orgPhone: document.getElementById('orgPhone'),
+                orgEmail: document.getElementById('orgEmail'),
+                orgNameError: document.getElementById('orgNameError'),
+                orgInnError: document.getElementById('orgInnError'),
+                orgPhoneError: document.getElementById('orgPhoneError'),
+                orgEmailError: document.getElementById('orgEmailError'),
+                orgDocsContainer: document.getElementById('orgDocsContainer'),
+                opoListContainer: document.getElementById('opoListContainer'),
+                expertiseListContainer: document.getElementById('expertiseListContainer'),
+                orgDocTypeSelect: document.getElementById('orgDocTypeSelect'),
+                addOrgDocBtn: document.getElementById('addOrgDocBtn'),
+                addOpoBtn: document.getElementById('addOpoBtn'),
+                addExpertiseInOrgBtn: document.getElementById('addExpertiseInOrgBtn'),
+                saveOrgBtn: document.getElementById('saveOrg'),
+                deleteOrgBtn: document.getElementById('deleteOrgBtn'),
+                cancelModal: document.getElementById('cancelModal'),
+                expertiseModal: document.getElementById('expertiseModal'),
+                closeExpertiseModal: document.getElementById('closeExpertiseModal'),
+                expertiseOrgName: document.getElementById('expertiseOrgName'),
+                expertiseName: document.getElementById('expertiseName'),
+                expertiseType: document.getElementById('expertiseType'),
+                expertiseDate: document.getElementById('expertiseDate'),
+                expertiseDuration: document.getElementById('expertiseDuration'),
+                expertiseExpert: document.getElementById('expertiseExpert'),
+                expertiseFileInfo: document.getElementById('expertiseFileInfo'),
+                expertiseFile: document.getElementById('expertiseFile'),
+                expertiseFileAttach: document.getElementById('expertiseFileAttach'),
+                saveExpertise: document.getElementById('saveExpertise'),
+                cancelExpertiseModal: document.getElementById('cancelExpertiseModal'),
+                confirmModal: document.getElementById('confirmModal'),
+                closeConfirmModal: document.getElementById('closeConfirmModal'),
+                confirmMessage: document.getElementById('confirmMessage'),
+                confirmCancelBtn: document.getElementById('confirmCancelBtn'),
+                confirmOkBtn: document.getElementById('confirmOkBtn'),
+                reportResultModal: document.getElementById('reportResultModal'),
+                closeReportResultModal: document.getElementById('closeReportResultModal'),
+                closeReportResultBtn: document.getElementById('closeReportResultBtn'),
+                exportReportExcelBtn: document.getElementById('exportReportExcelBtn'),
+                reportResultTitle: document.getElementById('reportResultTitle'),
+                reportResultContent: document.getElementById('reportResultContent'),
+                modalTitle: document.getElementById('modalTitle'),
+                expertiseModalTitle: document.getElementById('expertiseModalTitle')
+            };
+        }
+
+        setButtonLoading(button, isLoading, originalText = null) {
+            if (isLoading) {
+                button.dataset.originalText = button.textContent;
+                button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Загрузка...';
+                button.disabled = true;
+            } else {
+                button.textContent = button.dataset.originalText || (originalText || button.textContent);
+                button.disabled = false;
+            }
+        }
+
+        init() {
+            this.bindAuthEvents();
+            this.bindMainEvents();
+            this.updateAuthMode();
+            this.setupLiveValidation();
+            this.setupDropdown();
+            if (token) {
+                const savedUsername = localStorage.getItem('username');
+                if (savedUsername) this.elements.currentUsername.innerText = savedUsername;
+                this.elements.authModal.classList.remove('active');
+                this.elements.mainUI.style.display = 'block';
+                this.loadOrganizations();
+            } else {
+                this.elements.authModal.classList.add('active');
+                this.elements.mainUI.style.display = 'none';
+            }
+        }
+
+        setupDropdown() {
+            this.elements.reportDropdownBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isVisible = this.elements.reportDropdownMenu.style.display === 'block';
+                this.elements.reportDropdownMenu.style.display = isVisible ? 'none' : 'block';
+            });
+            document.addEventListener('click', () => {
+                this.elements.reportDropdownMenu.style.display = 'none';
+            });
+            this.elements.reportExpiredBtn.addEventListener('click', () => this.generateReport('expired'));
+            this.elements.reportMonthBtn.addEventListener('click', () => this.generateReport('month'));
+            this.elements.reportTwoMonthsBtn.addEventListener('click', () => this.generateReport('twoMonths'));
+            this.elements.reportMissingDocsBtn.addEventListener('click', () => this.generateMissingDocsReport());
+            this.elements.reportIncompleteBtn.addEventListener('click', () => this.generateIncompleteReport());
+        }
+
+        setupLiveValidation() {
+            this.elements.orgName.addEventListener('blur', () => this.validateOrgName());
+            this.elements.orgInn.addEventListener('input', () => this.validateOrgInn());
+            this.elements.orgPhone.addEventListener('input', () => this.validateOrgPhone());
+            this.elements.orgEmail.addEventListener('blur', () => this.validateOrgEmail());
+        }
+
+        validateOrgName() {
+            const value = this.elements.orgName.value.trim();
+            if (!value) {
+                this.elements.orgNameError.innerText = 'Название обязательно';
+                this.elements.orgNameError.classList.add('visible');
+                this.elements.orgName.classList.add('error');
+                return false;
+            } else {
+                this.elements.orgNameError.classList.remove('visible');
+                this.elements.orgName.classList.remove('error');
+                return true;
+            }
+        }
+
+        validateOrgInn() {
+            const value = this.elements.orgInn.value;
+            const digitsOnly = value.replace(/\D/g, '');
+            const isValid = digitsOnly.length >= 10 && digitsOnly.length <= 12;
+            if (value && !isValid) {
+                this.elements.orgInnError.innerText = 'ИНН должен содержать 10-12 цифр';
+                this.elements.orgInnError.classList.add('visible');
+                this.elements.orgInn.classList.add('error');
+                return false;
+            } else {
+                this.elements.orgInnError.classList.remove('visible');
+                this.elements.orgInn.classList.remove('error');
+                return true;
+            }
+        }
+
+        validateOrgPhone() {
+            const value = this.elements.orgPhone.value;
+            const digitsOnly = value.replace(/\D/g, '');
+            const isValid = digitsOnly.length >= 10 && digitsOnly.length <= 12;
+            if (value && !isValid) {
+                this.elements.orgPhoneError.innerText = 'Неверный формат телефона (10-12 цифр)';
+                this.elements.orgPhoneError.classList.add('visible');
+                this.elements.orgPhone.classList.add('error');
+                return false;
+            } else {
+                this.elements.orgPhoneError.classList.remove('visible');
+                this.elements.orgPhone.classList.remove('error');
+                return true;
+            }
+        }
+
+        validateOrgEmail() {
+            const value = this.elements.orgEmail.value.trim();
+            if (value && !/^[^\s@]+@([^\s@]+\.)+[^\s@]+$/.test(value)) {
+                this.elements.orgEmailError.innerText = 'Неверный email';
+                this.elements.orgEmailError.classList.add('visible');
+                this.elements.orgEmail.classList.add('error');
+                return false;
+            } else {
+                this.elements.orgEmailError.classList.remove('visible');
+                this.elements.orgEmail.classList.remove('error');
+                return true;
+            }
+        }
+
+        bindAuthEvents() {
+            this.elements.switchAuthBtn.addEventListener('click', () => {
+                this.isLoginMode = !this.isLoginMode;
+                this.updateAuthMode();
+            });
+            this.elements.submitAuthBtn.addEventListener('click', async () => {
+                const username = this.elements.authUsername.value.trim();
+                const password = this.elements.authPassword.value;
+                const email = this.elements.authEmail.value.trim();
+                if (!username || !password) {
+                    this.elements.authError.innerText = 'Заполните имя пользователя и пароль';
+                    this.elements.authError.style.display = 'block';
+                    return;
+                }
+                if (!this.isLoginMode && (!email.includes('@') || email.length < 5)) {
+                    this.elements.authError.innerText = 'Введите корректный email';
+                    this.elements.authError.style.display = 'block';
+                    return;
+                }
+                this.setButtonLoading(this.elements.submitAuthBtn, true, this.isLoginMode ? 'Войти' : 'Зарегистрироваться');
+                try {
+                    let response;
+                    if (this.isLoginMode) {
+                        response = await fetch(`${API_URL}/auth/login`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ username, password })
+                        });
+                    } else {
+                        response = await fetch(`${API_URL}/auth/register`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ username, email, password })
                         });
                     }
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.message);
+                    token = data.token;
+                    localStorage.setItem('token', token);
+                    currentUser = data.user;
+                    localStorage.setItem('username', currentUser.username);
+                    this.elements.currentUsername.innerText = currentUser.username;
+                    this.elements.authModal.classList.remove('active');
+                    this.elements.mainUI.style.display = 'block';
+                    await this.loadOrganizations();
+                    showToast(`Добро пожаловать, ${username}!`, 'success');
+                } catch (err) {
+                    this.elements.authError.innerText = err.message;
+                    this.elements.authError.style.display = 'block';
+                } finally {
+                    this.setButtonLoading(this.elements.submitAuthBtn, false);
                 }
-            }
+            });
+            this.elements.logoutBtn.addEventListener('click', () => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('username');
+                token = null;
+                this.elements.mainUI.style.display = 'none';
+                this.elements.authModal.classList.add('active');
+                this.isLoginMode = true;
+                this.updateAuthMode();
+                this.elements.currentUsername.innerText = '';
+            });
+            this.elements.closeAuthModal.addEventListener('click', () => this.elements.authModal.classList.remove('active'));
         }
 
-        res.json(report);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Ошибка при формировании отчёта' });
-    }
-};
+        updateAuthMode() {
+            if (this.isLoginMode) {
+                this.elements.authModalTitle.innerText = 'Вход';
+                this.elements.switchAuthBtn.innerText = 'Регистрация';
+                this.elements.submitAuthBtn.innerText = 'Войти';
+                this.elements.authEmailRow.style.display = 'none';
+            } else {
+                this.elements.authModalTitle.innerText = 'Регистрация';
+                this.elements.switchAuthBtn.innerText = 'Вход';
+                this.elements.submitAuthBtn.innerText = 'Зарегистрироваться';
+                this.elements.authEmailRow.style.display = 'block';
+            }
+            this.elements.authError.style.display = 'none';
+        }
 
-// 2. Отчёт "Организации с незаполненными полями" (проверка обязательных полей)
-exports.getIncompleteCardsReport = async (req, res) => {
-    try {
-        const orgsResult = await pool.query('SELECT id, name, inn, phone, email FROM organizations ORDER BY id');
-        const report = [];
+        async loadOrganizations() {
+            try {
+                const data = await apiRequest('/orgs', { method: 'GET' });
+                this.organizations = data;
+                this.applyFilterAndSort();
+                this.initVirtualScroll();
+            } catch (err) { showToast(err.message, 'warning'); }
+        }
 
-        for (const org of orgsResult.rows) {
-            // Проверка полей организации (обязательные: name)
-            if (!org.name || org.name.trim() === '') {
-                report.push({
-                    org_name: org.name || '(без названия)',
-                    section: 'Организация',
-                    field: 'Название',
-                    value: org.name || ''
+        countExpired(org) {
+            let c = 0;
+            if (org.docs) Object.values(org.docs).forEach(d => { if (d.dateEnd && isExpired(d.dateEnd)) c++; });
+            if (org.opoList) org.opoList.forEach(opo => { if (opo.docs) Object.values(opo.docs).forEach(d => { if (d.dateEnd && isExpired(d.dateEnd)) c++; }); });
+            if (org.expertizy) org.expertizy.forEach(e => { if (e.dateEnd && isExpired(e.dateEnd)) c++; });
+            return c;
+        }
+
+        getExpiredDocsList(org) {
+            const items = [];
+            if (org.docs) Object.entries(org.docs).forEach(([type, doc]) => {
+                if (doc.dateEnd && isExpired(doc.dateEnd)) {
+                    const title = this.docTypesOrg.find(t => t.id === type)?.title || type;
+                    items.push(`📄 ${title} (до ${formatDate(doc.dateEnd)})`);
+                }
+            });
+            if (org.expertizy) org.expertizy.forEach(exp => {
+                if (exp.dateEnd && isExpired(exp.dateEnd)) {
+                    items.push(`🔬 Экспертиза: ${exp.name} (${exp.type}, до ${formatDate(exp.dateEnd)})`);
+                }
+            });
+            if (org.opoList) org.opoList.forEach(opo => {
+                if (opo.docs) Object.entries(opo.docs).forEach(([type, doc]) => {
+                    if (doc.dateEnd && isExpired(doc.dateEnd)) {
+                        const title = this.docTypesOpo.find(t => t.id === type)?.title || type;
+                        items.push(`🏭 ОПО "${opo.name}": ${title} (до ${formatDate(doc.dateEnd)})`);
+                    }
                 });
+            });
+            return items.length ? items.join('; ') : '—';
+        }
+
+        applyFilterAndSort() {
+            let filtered = this.organizations.filter(org => {
+                if (!this.searchTerm) return true;
+                const s = this.searchTerm.toLowerCase();
+                return org.name?.toLowerCase().includes(s) || (org.opoList || []).some(o => o.name?.toLowerCase().includes(s)) || org.inn?.includes(s);
+            });
+            filtered.sort((a,b) => {
+                let av,bv;
+                if (this.sortField === 'npp') return this.sortDir === 'asc' ? a.id - b.id : b.id - a.id;
+                if (this.sortField === 'createdAt') { av = a.createdAt||''; bv = b.createdAt||''; }
+                else if (this.sortField === 'org') { av = a.name||''; bv = b.name||''; }
+                else if (this.sortField === 'opoNames') { av = (a.opoList||[]).map(o=>o.name).join(','); bv = (b.opoList||[]).map(o=>o.name).join(','); }
+                else if (this.sortField === 'opoCount') { av = (a.opoList||[]).length; bv = (b.opoList||[]).length; }
+                else if (this.sortField === 'expertiseCount') { av = (a.expertizy||[]).length; bv = (b.expertizy||[]).length; }
+                else if (this.sortField === 'expiredCount') { av = this.countExpired(a); bv = this.countExpired(b); }
+                else return 0;
+                if (this.sortDir === 'asc') return av > bv ? 1 : -1;
+                else return av < bv ? 1 : -1;
+            });
+            this.filteredOrgs = filtered;
+            this.currentPage = 1;
+            this.renderVirtual();
+        }
+
+        initVirtualScroll() {
+            const calculateVisibleRows = () => {
+                if (this.wrapper) {
+                    const containerHeight = this.wrapper.clientHeight;
+                    this.visibleRows = Math.ceil(containerHeight / this.rowHeight) + 3;
+                }
+            };
+            calculateVisibleRows();
+            window.addEventListener('resize', () => { calculateVisibleRows(); this.renderVirtual(); });
+            if (this.scrollHandler) this.wrapper.removeEventListener('scroll', this.scrollHandler);
+            this.scrollHandler = () => {
+                if (!this.wrapper) return;
+                const scrollTop = this.wrapper.scrollTop;
+                const newStartIndex = Math.floor(scrollTop / this.rowHeight);
+                if (newStartIndex !== this.startIndex) {
+                    this.startIndex = newStartIndex;
+                    this.renderVirtual();
+                }
+            };
+            this.wrapper.addEventListener('scroll', this.scrollHandler);
+            this.renderVirtual();
+        }
+
+        createRowElement(org, npp) {
+            const row = createSafeElement('tr', { 'data-id': org.id.toString() });
+            if (this.countExpired(org) > 0) row.classList.add('expired-row');
+            const cells = [
+                npp.toString(),
+                org.createdAt ? formatDate(org.createdAt) : '—',
+                org.name || '',
+                (org.opoList || []).map(o => o.name).join(', '),
+                (org.opoList || []).length.toString(),
+                (org.expertizy || []).length.toString(),
+                this.countExpired(org).toString(),
+                this.getExpiredDocsList(org)
+            ];
+            cells.forEach((cellText, i) => {
+                const td = createSafeElement('td', { title: cellText }, cellText);
+                if (i === 7) td.classList.add('expired-docs-cell');
+                row.appendChild(td);
+            });
+            return row;
+        }
+
+        renderVirtual() {
+            if (!this.tbody) return;
+            const startIdxGlobal = (this.currentPage-1) * this.itemsPerPage;
+            const endIdxGlobal = Math.min(startIdxGlobal + this.itemsPerPage, this.filteredOrgs.length);
+            const totalRows = endIdxGlobal - startIdxGlobal;
+            if (totalRows === 0) {
+                this.tbody.innerHTML = '<tr><td colspan="8" style="text-align:center">Нет данных</td></tr>';
+                return;
             }
-            // ИНН, телефон, email – не обязательны, но можно проверить на пустоту
-            if (!org.inn || org.inn.trim() === '') {
-                report.push({
-                    org_name: org.name,
-                    section: 'Организация',
-                    field: 'ИНН',
-                    value: ''
+            const startRender = Math.max(0, this.startIndex);
+            const endRender = Math.min(totalRows, this.startIndex + this.visibleRows);
+            const fragment = document.createDocumentFragment();
+            const spacerTop = document.createElement('tr');
+            spacerTop.style.height = `${startRender * this.rowHeight}px`;
+            spacerTop.style.background = 'transparent';
+            fragment.appendChild(spacerTop);
+            for (let i = startRender; i < endRender; i++) {
+                const globalIndex = startIdxGlobal + i;
+                if (globalIndex >= this.filteredOrgs.length) break;
+                const org = this.filteredOrgs[globalIndex];
+                const row = this.createRowElement(org, globalIndex+1);
+                fragment.appendChild(row);
+            }
+            const spacerBottom = document.createElement('tr');
+            const bottomHeight = Math.max(0, (totalRows - endRender) * this.rowHeight);
+            spacerBottom.style.height = `${bottomHeight}px`;
+            spacerBottom.style.background = 'transparent';
+            fragment.appendChild(spacerBottom);
+            this.tbody.innerHTML = '';
+            this.tbody.appendChild(fragment);
+            if (this.selectedOrgId) this.setSelectedId(this.selectedOrgId);
+        }
+
+        setSelectedId(id) {
+            document.querySelectorAll('#tableBody tr').forEach(row => {
+                if (parseInt(row.dataset.id) === id) row.classList.add('selected');
+                else row.classList.remove('selected');
+            });
+        }
+
+        bindMainEvents() {
+            this.elements.searchInput.addEventListener('input', (e) => { this.searchTerm = e.target.value; this.applyFilterAndSort(); });
+            document.querySelectorAll('th[data-sort]').forEach(th => {
+                th.addEventListener('click', () => {
+                    const field = th.dataset.sort;
+                    if (this.sortField === field) this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+                    else { this.sortField = field; this.sortDir = 'asc'; }
+                    this.applyFilterAndSort();
                 });
+            });
+            this.elements.itemsPerPage.addEventListener('change', (e) => { this.itemsPerPage = parseInt(e.target.value); this.currentPage = 1; this.applyFilterAndSort(); });
+            this.elements.prevPage.addEventListener('click', () => { if (this.currentPage > 1) { this.currentPage--; this.applyFilterAndSort(); } });
+            this.elements.nextPage.addEventListener('click', () => { const totalPages = Math.ceil(this.filteredOrgs.length/this.itemsPerPage); if (this.currentPage < totalPages) { this.currentPage++; this.applyFilterAndSort(); } });
+            this.elements.tbody.addEventListener('click', (e) => {
+                const row = e.target.closest('tr');
+                if (row && row.dataset.id) {
+                    this.selectedOrgId = parseInt(row.dataset.id);
+                    this.setSelectedId(this.selectedOrgId);
+                }
+            });
+            this.elements.tbody.addEventListener('dblclick', (e) => {
+                const row = e.target.closest('tr');
+                if (row && row.dataset.id) {
+                    const id = parseInt(row.dataset.id);
+                    const org = this.organizations.find(o => o.id === id);
+                    if (org) this.openOrgModal(org);
+                }
+            });
+            this.elements.addOrgBtn.addEventListener('click', () => this.openOrgModal());
+            this.elements.cancelModal.addEventListener('click', () => this.elements.orgModal.classList.remove('active'));
+            this.elements.closeOrgModal.addEventListener('click', () => this.elements.orgModal.classList.remove('active'));
+            this.elements.collapseCardBtn.addEventListener('click', () => this.elements.orgModal.classList.remove('active'));
+            this.elements.saveOrgBtn.addEventListener('click', () => this.saveOrg());
+            this.elements.deleteOrgBtn.addEventListener('click', () => this.showConfirmDialog('Удалить организацию?', () => this.deleteOrg()));
+            this.elements.addOpoBtn.addEventListener('click', () => this.addOpoBlock());
+            this.elements.addExpertiseInOrgBtn.addEventListener('click', () => { if (this.selectedOrgId) this.openExpertiseModal(this.selectedOrgId, -1); else showToast('Сначала выберите организацию', 'warning'); });
+            this.elements.exportBtn.addEventListener('click', () => this.exportExcel());
+            this.elements.importBtn.addEventListener('click', () => this.elements.importFileInput.click());
+            this.elements.importFileInput.addEventListener('change', async (e) => await this.importExcel(e));
+            this.elements.backupBtn.addEventListener('click', () => this.exportDatabaseBackup());
+            this.elements.cancelExpertiseModal.addEventListener('click', () => this.elements.expertiseModal.classList.remove('active'));
+            this.elements.closeExpertiseModal.addEventListener('click', () => this.elements.expertiseModal.classList.remove('active'));
+            this.elements.saveExpertise.addEventListener('click', () => this.saveExpertise());
+            this.elements.expertiseFileAttach.addEventListener('click', () => this.elements.expertiseFile.click());
+            this.elements.expertiseFile.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    try {
+                        const res = await apiRequest('/files/upload', { method: 'POST', body: formData });
+                        this.elements.expertiseFileInfo.textContent = res.originalName;
+                    } catch(err) { showToast('Ошибка загрузки файла', 'warning'); }
+                }
+            });
+            this.elements.orgDocTypeSelect.innerHTML = this.docTypesOrg.map(t => `<option value="${t.id}">${t.title}</option>`).join('');
+            this.elements.addOrgDocBtn.addEventListener('click', () => {
+                const typeId = this.elements.orgDocTypeSelect.value;
+                const typeInfo = this.docTypesOrg.find(t => t.id === typeId);
+                if (typeInfo) {
+                    const block = this.createDocBlock(typeInfo, null, null);
+                    this.elements.orgDocsContainer.appendChild(block);
+                }
+            });
+            this.elements.confirmCancelBtn.addEventListener('click', () => this.elements.confirmModal.classList.remove('active'));
+            this.elements.closeConfirmModal.addEventListener('click', () => this.elements.confirmModal.classList.remove('active'));
+            this.elements.confirmOkBtn.addEventListener('click', () => {
+                if (this.pendingConfirmCallback) {
+                    this.pendingConfirmCallback();
+                    this.pendingConfirmCallback = null;
+                }
+                this.elements.confirmModal.classList.remove('active');
+            });
+            this.elements.closeReportResultModal.addEventListener('click', () => this.elements.reportResultModal.classList.remove('active'));
+            this.elements.closeReportResultBtn.addEventListener('click', () => this.elements.reportResultModal.classList.remove('active'));
+            this.elements.exportReportExcelBtn.addEventListener('click', () => this.exportReportToExcel());
+        }
+
+        showConfirmDialog(message, callback) {
+            this.elements.confirmMessage.innerText = message;
+            this.pendingConfirmCallback = callback;
+            this.elements.confirmModal.classList.add('active');
+        }
+
+        createDocBlock(typeInfo, data = null, onRemove) {
+            const div = createSafeElement('div', { class: 'org-doc-item', 'data-doc-id': typeInfo.id });
+            const titleDiv = createSafeElement('div', { class: 'doc-title' }, typeInfo.title);
+            const removeIcon = createSafeElement('i', { class: 'fas fa-times-circle remove-doc' });
+            titleDiv.appendChild(removeIcon);
+            div.appendChild(titleDiv);
+            if (typeInfo.hasDuration) {
+                const durRow = createSafeElement('div', { class: 'duration-row' });
+                const dateInp = createSafeElement('input', { type: 'date', class: 'doc-date' });
+                const durSel = createSafeElement('select', { class: 'doc-duration' });
+                for (let y of [1,2,3,4,5]) {
+                    const opt = createSafeElement('option', { value: y.toString() }, `${y} год`);
+                    durSel.appendChild(opt);
+                }
+                const endSpan = createSafeElement('span', { class: 'doc-end-display' });
+                durRow.appendChild(dateInp); durRow.appendChild(durSel); durRow.appendChild(endSpan);
+                div.appendChild(durRow);
+                const updateEnd = () => {
+                    if (dateInp.value) {
+                        const end = new Date(dateInp.value);
+                        end.setFullYear(end.getFullYear()+parseInt(durSel.value));
+                        endSpan.textContent = `Окончание: ${end.toISOString().split('T')[0]}`;
+                    } else endSpan.textContent = '';
+                };
+                dateInp.addEventListener('change', updateEnd);
+                durSel.addEventListener('change', updateEnd);
+                if (data) { dateInp.value = data.date || ''; durSel.value = data.duration || '1'; if (data.date) updateEnd(); }
             }
-            // Проверка ОПО
-            const opoResult = await pool.query('SELECT id, name, danger_class, reg_number FROM opo_objects WHERE organization_id = $1', [org.id]);
-            for (const opo of opoResult.rows) {
-                if (!opo.name || opo.name.trim() === '') {
-                    report.push({
-                        org_name: org.name,
-                        section: `ОПО (id:${opo.id})`,
-                        field: 'Название',
-                        value: opo.name || ''
-                    });
+            const attach = createSafeElement('div', { class: 'file-attach' });
+            const attachSpan = createSafeElement('span', {}, 'Прикрепить файл');
+            const attachIcon = createSafeElement('i', { class: 'fas fa-file-pdf' });
+            const fileInput = createSafeElement('input', { type: 'file', class: 'doc-file', style: 'display:none' });
+            attach.appendChild(attachSpan);
+            attach.appendChild(attachIcon);
+            attach.appendChild(fileInput);
+            div.appendChild(attach);
+            const fileInfo = createSafeElement('div', { class: 'file-info' }, (data && data.fileName) ? data.fileName : 'Файл не выбран');
+            div.appendChild(fileInfo);
+            attach.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    try {
+                        const uploadRes = await apiRequest('/files/upload', { method: 'POST', body: formData });
+                        fileInfo.textContent = uploadRes.originalName;
+                        if (data) data.fileName = uploadRes.originalName;
+                    } catch(err) { showToast('Ошибка загрузки файла: ' + err.message, 'warning'); }
                 }
-                if (!opo.danger_class || opo.danger_class.trim() === '') {
-                    report.push({
-                        org_name: org.name,
-                        section: `ОПО "${opo.name || 'без названия'}"`,
-                        field: 'Класс опасности',
-                        value: opo.danger_class || ''
-                    });
-                }
-                // reg_number не обязателен, но можно отметить пустоту
-                if (!opo.reg_number || opo.reg_number.trim() === '') {
-                    report.push({
-                        org_name: org.name,
-                        section: `ОПО "${opo.name || 'без названия'}"`,
-                        field: 'Регистрационный номер',
-                        value: ''
-                    });
-                }
-            }
-            // Проверка экспертиз
-            const expertisesResult = await pool.query('SELECT id, name, date, date_end, expert_name FROM expertises WHERE organization_id = $1', [org.id]);
-            for (const exp of expertisesResult.rows) {
-                if (!exp.name || exp.name.trim() === '') {
-                    report.push({
-                        org_name: org.name,
-                        section: 'Экспертиза',
-                        field: 'Название',
-                        value: exp.name || ''
-                    });
-                }
-                if (!exp.date) {
-                    report.push({
-                        org_name: org.name,
-                        section: `Экспертиза "${exp.name || 'без названия'}"`,
-                        field: 'Дата проведения',
-                        value: ''
-                    });
-                }
-                if (!exp.date_end) {
-                    report.push({
-                        org_name: org.name,
-                        section: `Экспертиза "${exp.name || 'без названия'}"`,
-                        field: 'Дата окончания',
-                        value: ''
-                    });
-                }
-                // expert_name не обязателен, но можно проверить
-                if (!exp.expert_name || exp.expert_name.trim() === '') {
-                    report.push({
-                        org_name: org.name,
-                        section: `Экспертиза "${exp.name || 'без названия'}"`,
-                        field: 'Ф.И.О. эксперта',
-                        value: ''
+            });
+            removeIcon.addEventListener('click', async () => {
+                this.showConfirmDialog('Удалить документ?', () => {
+                    div.remove();
+                    if (onRemove) onRemove();
+                    showToast('Документ удалён', 'warning');
+                });
+            });
+            return div;
+        }
+
+        addOpoBlock(data = null) {
+            const template = document.getElementById('opoItemTemplate').content.cloneNode(true);
+            const div = template.querySelector('.opo-item');
+            if (data) {
+                div.querySelector('.opo-name').value = data.name || '';
+                div.querySelector('.opo-addr').value = data.address || '';
+                div.querySelector('.opo-class').value = data.dangerClass || '';
+                div.querySelector('.opo-regnum').value = data.regNumber || '';
+                const docsContainer = div.querySelector('.opo-docs-container');
+                docsContainer.innerHTML = '';
+                if (data.docs) {
+                    this.docTypesOpo.forEach(type => {
+                        if (data.docs[type.id]) {
+                            const block = this.createDocBlock(type, data.docs[type.id], null);
+                            docsContainer.appendChild(block);
+                        }
                     });
                 }
             }
-            // Проверка документов организации (обязательные: дата и файл – опционально, но можно проверить)
-            const orgDocsResult = await pool.query('SELECT doc_type, date, date_end, file_name FROM org_documents WHERE organization_id = $1', [org.id]);
-            for (const doc of orgDocsResult.rows) {
-                if (!doc.date) {
-                    report.push({
-                        org_name: org.name,
-                        section: `Документ "${doc.doc_type}"`,
-                        field: 'Дата начала',
-                        value: ''
-                    });
+            const addDocBtn = div.querySelector('.add-opo-doc-btn');
+            const docTypeSelect = div.querySelector('.opo-doc-type-select');
+            docTypeSelect.innerHTML = this.docTypesOpo.map(t => `<option value="${t.id}">${t.title}</option>`).join('');
+            addDocBtn.addEventListener('click', () => {
+                const typeId = docTypeSelect.value;
+                const typeInfo = this.docTypesOpo.find(t => t.id === typeId);
+                if (typeInfo) {
+                    const block = this.createDocBlock(typeInfo, null, null);
+                    div.querySelector('.opo-docs-container').appendChild(block);
                 }
-                if (!doc.date_end) {
-                    report.push({
-                        org_name: org.name,
-                        section: `Документ "${doc.doc_type}"`,
-                        field: 'Дата окончания',
-                        value: ''
-                    });
+            });
+            div.querySelector('.remove-opo').addEventListener('click', () => {
+                if (this.elements.opoListContainer.children.length <= 1) {
+                    showToast('Должен быть хотя бы один ОПО', 'warning');
+                    return;
                 }
-                if (!doc.file_name || doc.file_name.trim() === '') {
-                    report.push({
-                        org_name: org.name,
-                        section: `Документ "${doc.doc_type}"`,
-                        field: 'Файл',
-                        value: 'Не загружен'
-                    });
+                this.showConfirmDialog('Удалить ОПО?', () => div.remove());
+            });
+            this.elements.opoListContainer.appendChild(div);
+        }
+
+        fillOrgDocs(docs) {
+            this.elements.orgDocsContainer.innerHTML = '';
+            this.docTypesOrg.forEach(type => {
+                if (docs && docs[type.id]) {
+                    const block = this.createDocBlock(type, docs[type.id], null);
+                    this.elements.orgDocsContainer.appendChild(block);
                 }
+            });
+        }
+
+        fillOpoList(opoList) {
+            this.elements.opoListContainer.innerHTML = '';
+            if (opoList && opoList.length) opoList.forEach(opo => this.addOpoBlock(opo));
+            else this.addOpoBlock();
+        }
+
+        renderExpertiseList(org) {
+            this.elements.expertiseListContainer.innerHTML = '';
+            if (org.expertizy && org.expertizy.length) {
+                org.expertizy.forEach((exp, idx) => {
+                    const div = createSafeElement('div', { class: 'expertise-item-compact' });
+                    const dateFormatted = exp.date ? formatDate(exp.date) : '—';
+                    const dateEndFormatted = exp.dateEnd ? formatDate(exp.dateEnd) : '—';
+                    const span = createSafeElement('span', {}, `${exp.name} (${exp.type}) — ${exp.expertName || ''}, дата: ${dateFormatted}, окончание: ${dateEndFormatted}`);
+                    const actions = createSafeElement('div', { class: 'expertise-actions' });
+                    const editIcon = createSafeElement('i', { class: 'fas fa-pen edit-expertise', 'data-idx': idx.toString() });
+                    const delIcon = createSafeElement('i', { class: 'fas fa-trash del-expertise', 'data-idx': idx.toString() });
+                    actions.appendChild(editIcon); actions.appendChild(delIcon);
+                    div.appendChild(span); div.appendChild(actions);
+                    this.elements.expertiseListContainer.appendChild(div);
+                });
+                this.elements.expertiseListContainer.querySelectorAll('.edit-expertise').forEach(btn => btn.addEventListener('click', () => this.openExpertiseModal(org.id, parseInt(btn.dataset.idx))));
+                this.elements.expertiseListContainer.querySelectorAll('.del-expertise').forEach(btn => btn.addEventListener('click', () => {
+                    this.showConfirmDialog('Удалить экспертизу?', async () => {
+                        org.expertizy.splice(parseInt(btn.dataset.idx),1);
+                        await apiRequest(`/orgs/${org.id}`, { method: 'PUT', body: JSON.stringify(org) });
+                        await this.loadOrganizations();
+                        this.renderExpertiseList(org);
+                        showToast('Экспертиза удалена', 'warning');
+                    });
+                }));
+            } else this.elements.expertiseListContainer.innerHTML = '<p>Нет экспертиз</p>';
+        }
+
+        openOrgModal(org = null) {
+            this.elements.modalTitle.innerText = org ? 'Редактирование организации' : 'Новая организация';
+            document.querySelectorAll('.error-message').forEach(el => el.classList.remove('visible'));
+            document.querySelectorAll('.error').forEach(el => el.classList.remove('error'));
+            if (org) {
+                this.elements.orgName.value = org.name || '';
+                this.elements.orgInn.value = org.inn || '';
+                this.elements.orgPhone.value = org.phone || '';
+                this.elements.orgEmail.value = org.email || '';
+                this.selectedOrgId = org.id;
+                this.currentOrgForEdit = JSON.parse(JSON.stringify(org));
+                this.fillOrgDocs(org.docs || {});
+                this.fillOpoList(org.opoList || []);
+                this.renderExpertiseList(org);
+            } else {
+                this.elements.orgName.value = ''; this.elements.orgInn.value = ''; this.elements.orgPhone.value = ''; this.elements.orgEmail.value = '';
+                this.elements.orgDocsContainer.innerHTML = ''; this.elements.opoListContainer.innerHTML = '';
+                this.addOpoBlock();
+                this.elements.expertiseListContainer.innerHTML = '<p>Нет экспертиз</p>';
+                this.selectedOrgId = null;
+                this.currentOrgForEdit = null;
             }
-            // Документы ОПО
-            const opoDocsResult = await pool.query(`
-                SELECT o.name as opo_name, od.doc_type, od.date, od.date_end, od.file_name
-                FROM opo_documents od
-                JOIN opo_objects o ON od.opo_id = o.id
-                WHERE o.organization_id = $1
-            `, [org.id]);
-            for (const doc of opoDocsResult.rows) {
-                if (!doc.date) {
-                    report.push({
-                        org_name: org.name,
-                        section: `ОПО "${doc.opo_name || 'без названия'}", документ "${doc.doc_type}"`,
-                        field: 'Дата начала',
-                        value: ''
-                    });
+            this.elements.orgModal.classList.add('active');
+        }
+
+        async saveOrg() {
+            if (!this.validateOrgName()) return;
+            if (!this.validateOrgInn()) return;
+            if (!this.validateOrgPhone()) return;
+            if (!this.validateOrgEmail()) return;
+            const opoDivs = this.elements.opoListContainer.querySelectorAll('.opo-item');
+            let hasValidOpo = false;
+            for (let opoDiv of opoDivs) {
+                const opoName = opoDiv.querySelector('.opo-name').value.trim();
+                if (opoName) { hasValidOpo = true; break; }
+            }
+            if (!hasValidOpo) {
+                showToast('Добавьте хотя бы одно ОПО с названием', 'warning');
+                return;
+            }
+            const orgData = {
+                org: this.elements.orgName.value.trim(),
+                inn: this.elements.orgInn.value.trim(),
+                phone: this.elements.orgPhone.value.trim(),
+                email: this.elements.orgEmail.value.trim(),
+                opoList: [],
+                docs: {},
+                expertizy: this.currentOrgForEdit?.expertizy || []
+            };
+            for (let block of this.elements.orgDocsContainer.querySelectorAll('.org-doc-item')) {
+                const docId = block.dataset.docId;
+                const fileInfo = block.querySelector('.file-info').textContent;
+                const fileName = fileInfo !== 'Файл не выбран' ? fileInfo : '';
+                if (this.docTypesOrg.find(t=>t.id===docId)?.hasDuration) {
+                    const date = block.querySelector('.doc-date')?.value || '';
+                    const duration = block.querySelector('.doc-duration')?.value || '1';
+                    const dateEnd = date ? new Date(new Date(date).setFullYear(new Date(date).getFullYear()+parseInt(duration))).toISOString().split('T')[0] : '';
+                    orgData.docs[docId] = { date, duration: parseInt(duration), dateEnd, fileName };
+                } else orgData.docs[docId] = { fileName };
+            }
+            for (let opoDiv of this.elements.opoListContainer.querySelectorAll('.opo-item')) {
+                const opoName = opoDiv.querySelector('.opo-name').value.trim();
+                const opoAddr = opoDiv.querySelector('.opo-addr').value;
+                const opoClass = opoDiv.querySelector('.opo-class').value;
+                const regNumber = opoDiv.querySelector('.opo-regnum').value;
+                const docs = {};
+                for (let docBlock of opoDiv.querySelectorAll('.opo-docs-container .org-doc-item')) {
+                    const docId = docBlock.dataset.docId;
+                    const fileInfo = docBlock.querySelector('.file-info').textContent;
+                    const fileName = fileInfo !== 'Файл не выбран' ? fileInfo : '';
+                    if (this.docTypesOpo.find(t=>t.id===docId)?.hasDuration) {
+                        const date = docBlock.querySelector('.doc-date')?.value || '';
+                        const duration = docBlock.querySelector('.doc-duration')?.value || '1';
+                        const dateEnd = date ? new Date(new Date(date).setFullYear(new Date(date).getFullYear()+parseInt(duration))).toISOString().split('T')[0] : '';
+                        docs[docId] = { date, duration: parseInt(duration), dateEnd, fileName };
+                    } else docs[docId] = { fileName };
                 }
-                if (!doc.date_end) {
-                    report.push({
-                        org_name: org.name,
-                        section: `ОПО "${doc.opo_name || 'без названия'}", документ "${doc.doc_type}"`,
-                        field: 'Дата окончания',
-                        value: ''
-                    });
+                orgData.opoList.push({ opoName, opoAddr, opoClass, regNumber, docs });
+            }
+            this.setButtonLoading(this.elements.saveOrgBtn, true, 'Сохранить');
+            try {
+                if (this.selectedOrgId) {
+                    await apiRequest(`/orgs/${this.selectedOrgId}`, { method: 'PUT', body: JSON.stringify(orgData) });
+                    showToast('Организация обновлена', 'success');
+                } else {
+                    await apiRequest('/orgs', { method: 'POST', body: JSON.stringify(orgData) });
+                    showToast('Организация добавлена', 'success');
                 }
-                if (!doc.file_name || doc.file_name.trim() === '') {
-                    report.push({
-                        org_name: org.name,
-                        section: `ОПО "${doc.opo_name || 'без названия'}", документ "${doc.doc_type}"`,
-                        field: 'Файл',
-                        value: 'Не загружен'
-                    });
-                }
+                await this.loadOrganizations();
+                this.elements.orgModal.classList.remove('active');
+            } catch (err) {
+                showToast(err.message, 'warning');
+            } finally {
+                this.setButtonLoading(this.elements.saveOrgBtn, false);
             }
         }
 
-        res.json(report);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Ошибка при формировании отчёта' });
+        async deleteOrg() {
+            if (!this.selectedOrgId) return;
+            this.setButtonLoading(this.elements.deleteOrgBtn, true, 'Удалить');
+            try {
+                await apiRequest(`/orgs/${this.selectedOrgId}`, { method: 'DELETE' });
+                await this.loadOrganizations();
+                this.elements.orgModal.classList.remove('active');
+                showToast('Организация удалена', 'success');
+            } catch (err) {
+                showToast(err.message, 'warning');
+            } finally {
+                this.setButtonLoading(this.elements.deleteOrgBtn, false);
+            }
+        }
+
+        openExpertiseModal(orgId, index = -1) {
+            const org = this.organizations.find(o => o.id === orgId);
+            if (!org) return;
+            this.elements.expertiseOrgName.value = org.name;
+            this.elements.expertiseName.value = '';
+            this.elements.expertiseType.value = 'ЗС';
+            this.elements.expertiseDate.value = '';
+            this.elements.expertiseDuration.value = '1';
+            this.elements.expertiseExpert.value = '';
+            this.elements.expertiseFileInfo.textContent = 'Файл не выбран';
+            this.elements.expertiseFile.value = '';
+            if (index >= 0 && org.expertizy && org.expertizy[index]) {
+                const exp = org.expertizy[index];
+                this.elements.expertiseName.value = exp.name;
+                this.elements.expertiseType.value = exp.type;
+                this.elements.expertiseDate.value = exp.date || '';
+                this.elements.expertiseDuration.value = exp.duration || '1';
+                this.elements.expertiseExpert.value = exp.expertName || '';
+                if (exp.fileName) this.elements.expertiseFileInfo.textContent = exp.fileName;
+                this.elements.expertiseModal.dataset.editIndex = index;
+                this.elements.expertiseModalTitle.innerText = 'Редактирование экспертизы';
+            } else {
+                this.elements.expertiseModal.dataset.editIndex = '-1';
+                this.elements.expertiseModalTitle.innerText = 'Новая экспертиза';
+            }
+            this.elements.expertiseModal.dataset.orgId = orgId;
+            this.elements.expertiseModal.classList.add('active');
+        }
+
+        async saveExpertise() {
+            const orgId = parseInt(this.elements.expertiseModal.dataset.orgId);
+            const editIndex = parseInt(this.elements.expertiseModal.dataset.editIndex);
+            const name = this.elements.expertiseName.value.trim();
+            if (!name) { showToast('Введите название экспертизы', 'warning'); return; }
+            const type = this.elements.expertiseType.value;
+            const date = this.elements.expertiseDate.value;
+            const duration = parseInt(this.elements.expertiseDuration.value);
+            const expert = this.elements.expertiseExpert.value.trim();
+            const fileName = this.elements.expertiseFileInfo.textContent !== 'Файл не выбран' ? this.elements.expertiseFileInfo.textContent : '';
+            const dateEnd = date ? new Date(new Date(date).setFullYear(new Date(date).getFullYear()+duration)).toISOString().split('T')[0] : '';
+            const expData = { name, type, date, duration, dateEnd, expertName: expert, fileName };
+            const org = this.organizations.find(o => o.id === orgId);
+            if (!org) return;
+            if (editIndex >= 0 && org.expertizy && org.expertizy[editIndex]) {
+                org.expertizy[editIndex] = expData;
+            } else {
+                if (!org.expertizy) org.expertizy = [];
+                org.expertizy.push(expData);
+            }
+            this.setButtonLoading(this.elements.saveExpertise, true, 'Сохранить');
+            try {
+                await apiRequest(`/orgs/${orgId}`, { method: 'PUT', body: JSON.stringify(org) });
+                await this.loadOrganizations();
+                this.elements.expertiseModal.classList.remove('active');
+                showToast('Экспертиза сохранена', 'success');
+            } catch (err) {
+                showToast(err.message, 'warning');
+            } finally {
+                this.setButtonLoading(this.elements.saveExpertise, false);
+            }
+        }
+
+        async generateReport(period) {
+            let daysFilter = null;
+            if (period === 'month') daysFilter = 30;
+            if (period === 'twoMonths') daysFilter = 60;
+            const allDocs = [];
+            for (let org of this.organizations) {
+                const docs = [];
+                if (org.docs) Object.entries(org.docs).forEach(([type, doc]) => {
+                    if (doc.dateEnd) {
+                        const isExpiredDoc = isExpired(doc.dateEnd);
+                        const isExpiring = daysFilter !== null && !isExpiredDoc && (new Date(doc.dateEnd.split('T')[0]) - new Date()) <= daysFilter*86400000;
+                        if ((period === 'expired' && isExpiredDoc) || (daysFilter !== null && isExpiring)) {
+                            const title = this.docTypesOrg.find(t=>t.id===type)?.title || type;
+                            docs.push({ type: 'Документ организации', name: title, dateEnd: doc.dateEnd });
+                        }
+                    }
+                });
+                if (org.expertizy) org.expertizy.forEach(exp => {
+                    if (exp.dateEnd) {
+                        const isExpiredExp = isExpired(exp.dateEnd);
+                        const isExpiring = daysFilter !== null && !isExpiredExp && (new Date(exp.dateEnd.split('T')[0]) - new Date()) <= daysFilter*86400000;
+                        if ((period === 'expired' && isExpiredExp) || (daysFilter !== null && isExpiring)) {
+                            docs.push({ type: 'Экспертиза', name: `${exp.name} (${exp.type})`, dateEnd: exp.dateEnd });
+                        }
+                    }
+                });
+                if (org.opoList) org.opoList.forEach(opo => {
+                    if (opo.docs) Object.entries(opo.docs).forEach(([type, doc]) => {
+                        if (doc.dateEnd) {
+                            const isExpiredDoc = isExpired(doc.dateEnd);
+                            const isExpiring = daysFilter !== null && !isExpiredDoc && (new Date(doc.dateEnd.split('T')[0]) - new Date()) <= daysFilter*86400000;
+                            if ((period === 'expired' && isExpiredDoc) || (daysFilter !== null && isExpiring)) {
+                                const title = this.docTypesOpo.find(t=>t.id===type)?.title || type;
+                                docs.push({ type: `Документ ОПО (${opo.name})`, name: title, dateEnd: doc.dateEnd });
+                            }
+                        }
+                    });
+                });
+                docs.forEach(d => allDocs.push({ Организация: org.name, Тип: d.type, Название: d.name, 'Дата окончания': formatDate(d.dateEnd) }));
+            }
+            if (allDocs.length === 0) { showToast('Нет документов, соответствующих выбранному периоду', 'info'); return; }
+            this.showReportResult(period === 'expired' ? 'Просроченные документы' : (period === 'month' ? 'Истекают через месяц' : 'Истекают через два месяца'), allDocs);
+        }
+
+        async generateMissingDocsReport() {
+            this.setButtonLoading(this.elements.reportMissingDocsBtn, true, 'Загрузка');
+            try {
+                const data = await apiRequest('/orgs/reports/missing-docs', { method: 'GET' });
+                if (!data.length) { showToast('Все организации имеют необходимые документы', 'info'); return; }
+                const mappedData = data.map(item => ({
+                    'Организация': item.org_name,
+                    'ОПО': item.opo_name || '—',
+                    'Отсутствующий документ': item.doc_type,
+                    'Причина': item.reason
+                }));
+                this.showReportResult('Организации без подгруженных документов', mappedData);
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'warning');
+            } finally {
+                this.setButtonLoading(this.elements.reportMissingDocsBtn, false);
+            }
+        }
+
+        async generateIncompleteReport() {
+            this.setButtonLoading(this.elements.reportIncompleteBtn, true, 'Загрузка');
+            try {
+                const data = await apiRequest('/orgs/reports/incomplete-cards', { method: 'GET' });
+                if (!data.length) { showToast('Нет незаполненных обязательных полей', 'info'); return; }
+                const mappedData = data.map(item => ({
+                    'Организация': item.org_name,
+                    'Секция': item.section,
+                    'Поле': item.field,
+                    'Текущее значение': item.value || '—'
+                }));
+                this.showReportResult('Незаполненные поля', mappedData);
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'warning');
+            } finally {
+                this.setButtonLoading(this.elements.reportIncompleteBtn, false);
+            }
+        }
+
+        showReportResult(title, data) {
+            this.elements.reportResultTitle.innerText = title;
+            this.currentReportData = data;
+            const container = this.elements.reportResultContent;
+            container.innerHTML = '';
+            if (!data.length) {
+                container.innerHTML = '<p>Нет данных для отображения</p>';
+                this.elements.reportResultModal.classList.add('active');
+                return;
+            }
+            const headers = Object.keys(data[0]);
+            const table = createSafeElement('table', { class: 'report-table' });
+            const thead = createSafeElement('thead');
+            const headerRow = createSafeElement('tr');
+            headers.forEach(h => {
+                const th = createSafeElement('th', {}, h);
+                headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+            const tbody = createSafeElement('tbody');
+            data.forEach(row => {
+                const tr = createSafeElement('tr');
+                headers.forEach(h => {
+                    const td = createSafeElement('td', {}, row[h] !== undefined ? String(row[h]) : '—');
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+            container.appendChild(table);
+            this.elements.reportResultModal.classList.add('active');
+        }
+
+        exportReportToExcel() {
+            if (!this.currentReportData || !this.currentReportData.length) {
+                showToast('Нет данных для экспорта', 'warning');
+                return;
+            }
+            const ws = XLSX.utils.json_to_sheet(this.currentReportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Отчёт');
+            XLSX.writeFile(wb, `report_${new Date().toISOString().slice(0,19)}.xlsx`);
+            showToast('Экспорт выполнен', 'success');
+        }
+
+        exportExcel() {
+            this.setButtonLoading(this.elements.exportBtn, true, 'Экспорт');
+            try {
+                const data = this.filteredOrgs.map((org, idx) => ({
+                    '№': idx+1,
+                    'Дата добавления': org.createdAt,
+                    'Организация': org.name,
+                    'ИНН': org.inn,
+                    'Телефон': org.phone,
+                    'Email': org.email,
+                    'ОПО': (org.opoList||[]).map(o=>o.name).join(', '),
+                    'Кол-во ОПО': (org.opoList||[]).length,
+                    'Кол-во ЭПБ': (org.expertizy||[]).length,
+                    'Просроченных документов': this.countExpired(org)
+                }));
+                const ws = XLSX.utils.json_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Организации');
+                XLSX.writeFile(wb, `archive_${new Date().toISOString().slice(0,19)}.xlsx`);
+                showToast('Экспорт выполнен', 'success');
+            } catch (err) {
+                showToast('Ошибка экспорта: ' + err.message, 'warning');
+            } finally {
+                this.setButtonLoading(this.elements.exportBtn, false);
+            }
+        }
+
+        async importExcel(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append('file', file);
+            this.setButtonLoading(this.elements.importBtn, true, 'Импорт');
+            try {
+                const response = await apiRequest('/orgs/import-excel', { method: 'POST', body: formData });
+                showToast(`Импорт завершён. Добавлено организаций: ${response.stats.addedOrganizations}, экспертиз: ${response.stats.addedExpertises}, пропущено: ${response.stats.skipped}`, 'success');
+                if (response.stats.errors && response.stats.errors.length) {
+                    console.warn('Ошибки импорта:', response.stats.errors);
+                    showToast(`Были ошибки: ${response.stats.errors.slice(0,3).join('; ')}`, 'warning');
+                }
+                await this.loadOrganizations();
+            } catch (err) {
+                showToast('Ошибка при импорте: ' + err.message, 'warning');
+            } finally {
+                this.setButtonLoading(this.elements.importBtn, false);
+                e.target.value = '';
+            }
+        }
+
+        async exportDatabaseBackup() {
+            this.setButtonLoading(this.elements.backupBtn, true, 'Экспорт');
+            try {
+                const response = await fetch(`${API_URL}/orgs/export-db`, {
+                    method: 'GET',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!response.ok) throw new Error('Ошибка создания дампа');
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `backup_${new Date().toISOString().slice(0,19)}.sql`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showToast('Дамп базы данных скачан', 'success');
+            } catch (err) {
+                showToast('Ошибка: ' + err.message, 'warning');
+            } finally {
+                this.setButtonLoading(this.elements.backupBtn, false);
+            }
+        }
     }
-};
 
-// 3. Экспорт дампа базы данных (резервное копирование)
-const { exec } = require('child_process');
-const path = require('path');
-const fs = require('fs');
-
-exports.exportDatabaseDump = async (req, res) => {
-    const dbName = process.env.DB_NAME;
-    const dbUser = process.env.DB_USER;
-    const dbHost = process.env.DB_HOST;
-    const dbPort = process.env.DB_PORT;
-    const dumpFile = path.join(__dirname, '../../dump.sql');
-    const command = `pg_dump -U ${dbUser} -h ${dbHost} -p ${dbPort} ${dbName} > "${dumpFile}"`;
-
-    exec(command, { env: { PGPASSWORD: process.env.DB_PASSWORD } }, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Ошибка pg_dump: ${error}`);
-            return res.status(500).json({ message: 'Ошибка при создании дампа' });
-        }
-        res.download(dumpFile, `backup_${new Date().toISOString().slice(0,19)}.sql`, (err) => {
-            if (err) console.error(err);
-            // удаляем временный файл после отправки
-            fs.unlinkSync(dumpFile);
-        });
-    });
-};
+    window.app = new App();
+})();
+</script>
+</body>
+</html>
